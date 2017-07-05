@@ -1,0 +1,1 @@
+1. The algorithm is not linearizable. The idea is that the nice wait-free loop in `dequeue()` cannot see the effect of a concurrent `dequeue()` because the earliest index into TODO

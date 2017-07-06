@@ -66,9 +66,19 @@ class MSCLock implements Lock {
   // The rest is unchanged
 }
 ```
-The method considers two cases.
 
-1. We are at the end of the queue. In that case, notice that `next` is accessed before `tail` is accessed. That means that we cannot be in the state where  TODO
+#### Correctness
+
+1. Case `next == null`. Consider point in time after doing `tail.get()`. Lemma: `tail.get() == qnode` iff we own the lock.
+  - If `tail.get() == qnode`,  we're at the end of the queue. This is the state after we've exited `lock()`, and no other thread has attempted to acquire the lock yet. We know that because that thread will first need to do CAS on `tail`.
+  - Conversely, suppose that we own the lock. `next == null` means that either no other thread has attempted to grab the lock, or it is in the process of doing that (inside `lock()`). TODO
+
+
+The method considers two cases when we can hold the lock.
+
+1. We are at the end of the queue.
+    - If `next == null` and `tail.get() == qnode` are both true, that means that we're holding the lock: that's the state after exiting `lock()`. It's in fact "if and only if": `next` is never set to `null`, if it's null that means that it was never modified, that is, no other thread tried to acquire the lock since we left `lock()`.  
+    - Can any of these two expressions be false in this case, while we're still holding the lock? Note that if `next` is not null, then we're definitely not at the end of the queue. So the only case left to consider is when `tail.get() != qnode`. If it's `null`, that means that  
 
 
 ### A generic solution

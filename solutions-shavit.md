@@ -38,6 +38,18 @@ Unfortunately, the lock is actually no longer a TTAS lock, but rather a "TCAS" l
 
 ### `isLocked()` for CLH lock
 
+The solution is trivial: the thread owns the lock iff its local node is locked.
+
+```java
+class CLHLock {
+    public void isLocked() {
+        return tlNode.get().locked;
+    }
+}
+```
+
+To show that it's correct, consider the last lock/unlock operation preceding the call to `isLocked()` in this thread. If it was `lock()`, then this thread must be holding the lock, because otherwise it could not be calling `isLocked()` since it would be spinning in `lock()`. But in that case `node.locked` was set to `true` by `lock()`. If it was `unlock()` or none, then the thread cannot hold the lock; but the method set `node.locked` to `false`.
+
 ### `isLocked()` for MSC lock
 
 ```java

@@ -43,7 +43,7 @@ The solution is trivial: the thread owns the lock iff its local node is locked.
 ```java
 class CLHLock {
     public void isLocked() {
-        return tlNode.get().locked;
+        return myNode.get().locked;
     }
 }
 ```
@@ -52,38 +52,18 @@ To show that it's correct, consider the last lock/unlock operation preceding the
 
 ### `isLocked()` for MSC lock
 
-```java
-class MSCLock implements Lock {
-  AtomicReference<Qnode> tail = new AtomicReference<>();
-  ThreadLocal<Qnode> tlNode = ThreadLocal.withInitial(Qnode::new);
+It's impossible to implement without adding state. Consider that the observed value of `next` is `null`, and the value of `tail.get()` is neither `null` nor `qnode`. In this state, the lock might be owned by the current node, or might be not owned:
 
-  public boolean isLocked() {
-    Qnode qnode = tlNode.get();
-    Qnode next = qnode.next;
-    return next == null ? tail.get() == qnode : next.locked && !qnode.locked;
-  }
+- If this thread is not the owner, it is not in the queue. If some other thread is holding the lock, the `tail` is neither `null` nor `qnode`. And `qnode.next` is set to `null` by `unlock()`.
+- If this thread is holding the lock, and the first other thread attemtps to acquire the lock, that other thread might have succeeded in CASing `tail` to its own node, but not set `qnode.next` for this thread yet.
+
+This is exactly the kind of situation that is handled in `unlock()`. However, this method cannot have the same guarantees: `unlock()` can halt if this thread doesn't own the lock, but an `isLocked()` implementation that halts isn't useful.
   
-  // The rest is unchanged
-}
-```
-
-#### Correctness
-
-1. Case `next == null`. Consider point in time after doing `tail.get()`. Lemma: `tail.get() == qnode` iff we own the lock.
-  - If `tail.get() == qnode`,  we're at the end of the queue. This is the state after we've exited `lock()`, and no other thread has attempted to acquire the lock yet. We know that because that thread will first need to do CAS on `tail`.
-  - Conversely, suppose that we own the lock. `next == null` means that either no other thread has attempted to grab the lock, or it is in the process of doing that (inside `lock()`). TODO
-
-
-The method considers two cases when we can hold the lock.
-
-1. We are at the end of the queue.
-    - If `next == null` and `tail.get() == qnode` are both true, that means that we're holding the lock: that's the state after exiting `lock()`. It's in fact "if and only if": `next` is never set to `null`, if it's null that means that it was never modified, that is, no other thread tried to acquire the lock since we left `lock()`.  
-    - Can any of these two expressions be false in this case, while we're still holding the lock? Note that if `next` is not null, then we're definitely not at the end of the queue. So the only case left to consider is when `tail.get() != qnode`. If it's `null`, that means that  
-
+The only solution is to add state. Since we're adding it anyway, it could be a thread local variable which means "this thread owns the lock". See also the next section.
 
 ### A generic solution
 
-The problem can be solved for any lock by holding isLocked state in a separate ThreadLocal boolean variable. It is set to true when lock() is succeeded before the method returns, and set to false wen unlock() is successful (in MSC lock that happens after a busy wait) before the method returns. That's great, but we are storing more state compared to the specific solutions given above.
+The problem can be solved for any lock by holding isLocked state in a separate ThreadLocal boolean variable. It is set to true when lock() succeeds before the method returns, and set to false wen unlock() is successful (in MSC lock that happens after a busy wait) before the method returns. That's great, but we are storing more state compared to the specific solutions given above.
 
 
 ## Assignment 2
@@ -100,10 +80,10 @@ MSC lock as given in the lecture always allocates a new node. Let's suppose the 
 ```java
 class MCSLock implements Lock {
   AtomicReference<Qnode> tail = new AtomicReference<>();
-  ThreadLocal<Qnode> tlNode = ThreadLocal.withInitial(Qnode::new);
+  ThreadLocal<Qnode> myNode = ThreadLocal.withInitial(Qnode::new);
   
   public void lock() {
-    Qnode qnode = tlNode.get();
+    Qnode qnode = myNode.get();
     Qnode pred = tail.getAndSet(qnode);
     if (pred != null) {
        qnode.locked = true;
@@ -113,7 +93,7 @@ class MCSLock implements Lock {
   } 
   
   public void unlock() {
-    Qnode qnode = tlNode.get();
+    Qnode qnode = myNode.get();
     if (qnode.next == null) {
       if (tail.CAS(qnode, null))
         return;
